@@ -1,9 +1,13 @@
 package com.example.auto_selfie;
-import androidx.appcompat.app.AppCompatActivity;
 
+import static org.opencv.imgproc.Imgproc.connectedComponents;
+
+import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.SurfaceView;
+
+import androidx.appcompat.app.AppCompatActivity;
 
 import org.opencv.android.BaseLoaderCallback;
 import org.opencv.android.CameraBridgeViewBase;
@@ -12,13 +16,18 @@ import org.opencv.android.OpenCVLoader;
 import org.opencv.core.Core;
 import org.opencv.core.CvType;
 import org.opencv.core.Mat;
+import org.opencv.core.Scalar;
+import org.opencv.core.Size;
 import org.opencv.imgproc.Imgproc;
+
+import java.util.Comparator;
+import java.util.LinkedList;
 
 public class VideoShowActivity extends AppCompatActivity implements CameraBridgeViewBase.CvCameraViewListener2
 {
     JavaCameraView javaCameraView;
-    Mat mRGBA, mRGBAT, dst;
-
+    Mat mRGBA, mRGBAT, dst, bgr, hsv;
+    boolean STPflag = true , RCOFflag = false;
     BaseLoaderCallback baseLoaderCallback = new BaseLoaderCallback(VideoShowActivity.this) {
         @Override
         public void onManagerConnected(int status) {
@@ -56,6 +65,8 @@ public class VideoShowActivity extends AppCompatActivity implements CameraBridge
         mRGBA = new Mat(height,width, CvType.CV_8UC4);
         mRGBAT = new Mat();
         dst = new Mat();
+        hsv = new Mat();
+        bgr = new Mat();
     }
 
     @Override
@@ -63,6 +74,61 @@ public class VideoShowActivity extends AppCompatActivity implements CameraBridge
         mRGBA.release();
     }
 
+    public void sendImageToPython(Mat bImg1){
+        Mat bImg2 = new Mat();
+        Imgproc.resize(bImg1, bImg2, new Size(0, 0), 0.25, 0.25, Imgproc.INTER_AREA);
+        Mat labeled_img = new Mat();
+        connectedComponents(bImg2, labeled_img);
+        int cols = labeled_img.cols();
+        int rows = labeled_img.rows();
+        LinkedList<Integer> ll = new LinkedList<Integer>();
+        for (int i=0;i<rows;i++){
+            for (int j=0;j<cols;j++){
+               ll.add((int)(labeled_img.get(i,j)[0]));
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            ll.sort(Comparator.reverseOrder());
+        }
+        int max1=0,max1id=0,max2=0,max2id=0,current=-1,count=0;
+        for (int i=0;i<ll.size();i++){
+            if(ll.get(i) != 0)
+            {
+                if (ll.get(i) != current) {
+                    if (count > max1) {
+                        max2 = max1;
+                        max2id = max1id;
+                        max1 = count;
+                        max1id = current;
+                    }
+                    else if(count > max2){
+                        max2 = count;
+                        max2id = current;
+                    }
+                    count=0;
+                }
+                current = ll.get(i);
+                count++;
+            }
+        }
+        System.out.println("biggest: "+max1id+" size: "+max1+"\n second biggest: "+max2id+" size: "+max2);
+        for (int i=0;i<rows;i++){
+            for (int j=0;j<cols;j++){
+                if ((int)(labeled_img.get(i,j)[0]) != max1id || (int)(labeled_img.get(i,j)[0]) != max2id)
+                {
+                    labeled_img.put(i,j,0);
+                }
+                else
+                {
+                    labeled_img.put(i,j,1);
+                }
+            }
+        }
+    }
+
+    public boolean readContentsOfFile(){
+
+        return false; }
     @Override
     public Mat onCameraFrame(CameraBridgeViewBase.CvCameraViewFrame inputFrame) {
         mRGBA = inputFrame.rgba();
@@ -71,7 +137,18 @@ public class VideoShowActivity extends AppCompatActivity implements CameraBridge
         Imgproc.resize(mRGBAT, dst, mRGBA.size());
         mRGBA.release();
         mRGBAT.release();
-        return dst;
+        Imgproc.cvtColor(dst,bgr,Imgproc.COLOR_RGBA2BGR);
+        Imgproc.cvtColor(bgr,hsv,Imgproc.COLOR_BGR2HSV);
+        Core.inRange(hsv,new Scalar(0,20,60),new Scalar(17,110,255),hsv);
+        dst.release();
+        bgr.release();
+        if (STPflag){
+            sendImageToPython(hsv);
+        }
+        if(RCOFflag){
+            readContentsOfFile();
+        }
+        return hsv;
     }
 
     @Override
